@@ -1,0 +1,5 @@
+# Normalize line endings in the repository; the package ships LF-only text.
+* text=auto eol=lf
+
+# Binary assets keep their bytes untouched.
+*.svg binary

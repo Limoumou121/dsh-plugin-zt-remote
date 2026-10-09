@@ -1,0 +1,4 @@
+# dsh-plugin-zt-remote bundle layer: register the ZeroTier remote surface.
+- insert:
+    - id: zt-remote
+      name: dsh-plugin-zt-remote

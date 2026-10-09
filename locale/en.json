@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "ZeroTier Remote",
+    "description": "A narrow remote surface over the ZeroTier interface: list/create workspaces, create/continue conversations, follow output, answer approvals. The configuration plane is not exposed."
+  }
+}

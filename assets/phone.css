@@ -1,0 +1,39 @@
+/*
+ * Phone typography for the official Web UI.
+ *
+ * The shell is desktop-first: its stylesheet carries no width breakpoints, and the
+ * session rows are fixed at 14px/20px, which is dense on a phone at arm's length.
+ * This sheet only tightens type inside a narrow viewport, so a desktop window keeps
+ * its own sizing. It never changes layout structure, colour, or spacing.
+ *
+ * The selectors key on the CSS Modules hash pattern the workspace plugin emits
+ * (`<hash>_title`, `<hash>_meta`, `<hash>_time`). They break if that plugin renames
+ * those classes; each rule below states what it changes so a break is easy to spot.
+ */
+
+/* Session row title: 14px/20px -> 13px/18px. */
+@media (max-width: 768px) {
+  [class*="_title_"],
+  [class*="_searchResultTitle_"] {
+    font-size: 13px;
+    line-height: 18px;
+  }
+}
+
+/* Timestamp column: 10px/16px -> 9px/15px, so it stops competing with the title. */
+@media (max-width: 768px) {
+  [class*="_time_"],
+  [class*="_meta_"] {
+    font-size: 9px;
+    line-height: 15px;
+  }
+}
+
+/* Tighter rows in the session list only: the same classes appear in settings lists,
+   whose row rhythm should not change. */
+@media (max-width: 768px) {
+  [class*="_row_"] [class*="_title_"] {
+    font-size: 13px;
+    line-height: 18px;
+  }
+}

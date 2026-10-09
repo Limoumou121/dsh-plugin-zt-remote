@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DSH 远程</title>
+<style>
+  :root { color-scheme: light dark; --fg:#111; --bg:#fafafa; --muted:#6b7280; --line:#e5e7eb; --accent:#0b5cff; --card:#fff; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#f3f4f6; --bg:#17181a; --muted:#9ca3af; --line:#2c2e33; --accent:#6ea8fe; --card:#1f2124; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; color:var(--fg); background:var(--bg); }
+  header { position:sticky; top:0; display:flex; gap:8px; align-items:center; padding:10px 12px; background:var(--card); border-bottom:1px solid var(--line); }
+  header h1 { font-size:16px; margin:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  button { font:inherit; padding:8px 12px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); touch-action:manipulation; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  main { padding:12px; padding-bottom:96px; }
+  .row { padding:12px; margin-bottom:8px; background:var(--card); border:1px solid var(--line); border-radius:10px; }
+  .row small { color:var(--muted); display:block; margin-top:4px; word-break:break-all; }
+  .msg { padding:10px 12px; margin:8px 0; border-radius:10px; white-space:pre-wrap; word-break:break-word; }
+  .msg.user { background:var(--accent); color:#fff; margin-left:15%; }
+  .msg.assistant { background:var(--card); border:1px solid var(--line); margin-right:8%; }
+  .msg.tool, .msg.notice, .msg.turn-end { color:var(--muted); font-size:13px; padding:2px 4px; }
+  .msg.error { background:#7f1d1d; color:#fff; }
+  footer { position:fixed; bottom:0; left:0; right:0; display:flex; gap:8px; padding:10px 12px calc(10px + env(safe-area-inset-bottom)); background:var(--card); border-top:1px solid var(--line); }
+  footer input { flex:1; font:inherit; padding:10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<header>
+  <button id="back" class="hidden">‹ 返回</button>
+  <h1 id="title">DSH 远程</h1>
+  <button id="refresh">刷新</button>
+</header>
+<main>
+  <section id="pairing">
+    <div class="row">
+      <b>未配对</b>
+      <small id="pair-hint">配对成功后会自动进入官方 Web UI（/ui/）。也可以在这台电脑上运行 dsh 的终端里查看配对码。</small>
+    </div>
+    <div class="row">
+      <input id="pair-code" placeholder="配对码 ABCD-2345" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)">
+      <input id="pair-secret" placeholder="配对密钥" style="width:100%;margin-top:8px;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)">
+      <div style="margin-top:8px"><button class="primary" id="pair-go">配对</button></div>
+      <small id="pair-error"></small>
+    </div>
+  </section>
+  <section id="list" class="hidden"></section>
+  <section id="thread" class="hidden"></section>
+  <section id="approvals" class="hidden"></section>
+</main>
+<footer id="composer" class="hidden">
+  <input id="text" placeholder="继续这个任务…">
+  <button class="primary" id="send">发送</button>
+  <button id="cancel">停止</button>
+</footer>
+<script>
+(function () {
+  var TOKEN_KEY = 'dsh-zt-token';
+  var state = { token: localStorage.getItem(TOKEN_KEY) || '', view: 'roots', sessionId: null, workspaces: [], lastSeq: 0, source: null };
+
+  function el(id) { return document.getElementById(id); }
+  function show(id, on) { el(id).classList.toggle('hidden', !on); }
+  function setTitle(t) { el('title').textContent = t; }
+
+  function api(path, options) {
+    options = options || {};
+    var headers = { 'content-type': 'application/json' };
+    if (state.token) headers.authorization = 'Bearer ' + state.token;
+    return fetch(path, { method: options.method || 'GET', headers: headers, body: options.body ? JSON.stringify(options.body) : undefined })
+      .then(function (res) { return res.json().then(function (json) { return { status: res.status, json: json }; }); });
+  }
+
+  function bubble(entry) {
+    var div = document.createElement('div');
+    div.className = 'msg ' + entry.role;
+    if (entry.role === 'tool' || entry.role === 'tool-result') div.textContent = (entry.failed ? '✗ ' : '⚙ ') + entry.name + (entry.failed ? ' 失败' : ' 运行中');
+    else div.textContent = entry.text || '';
+    return div;
+  }
+
+  function renderThread() {
+    var thread = el('thread');
+    thread.dataset.rendered = '1';
+    return thread;
+  }
+
+  function renderApprovals(items) {
+    var box = el('approvals');
+    box.innerHTML = '';
+    items.forEach(function (ask) {
+      var card = document.createElement('div');
+      card.className = 'row';
+      card.innerHTML = '<b>需要批准：' + (ask.toolName || '工具') + '</b>' +
+        (ask.reason ? '<small>' + ask.reason + '</small>' : '') +
+        '<small>等待中 · ' + Math.max(0, Math.round(((ask.expiresAt || 0) - Date.now()) / 1000)) + ' 秒后交回桌面</small>';
+      var allow = document.createElement('button');
+      allow.className = 'primary';
+      allow.textContent = '允许一次';
+      allow.onclick = function () { answer(ask.id, true); };
+      var deny = document.createElement('button');
+      deny.textContent = '拒绝';
+      deny.style.marginLeft = '8px';
+      deny.onclick = function () { answer(ask.id, false); };
+      var actions = document.createElement('div');
+      actions.style.marginTop = '8px';
+      actions.appendChild(allow); actions.appendChild(deny);
+      card.appendChild(actions);
+      box.appendChild(card);
+    });
+    show('approvals', items.length > 0);
+  }
+
+  function answer(requestId, allow) {
+    api('/answers', { method: 'POST', body: { requestId: requestId, allow: allow } }).then(function () { loadApprovals(); });
+  }
+
+  function loadApprovals() {
+    if (!state.token) return;
+    api('/approvals').then(function (r) {
+      if (r.json.ok) renderApprovals(r.json.value.pending || []);
+    });
+  }
+
+  function onApprovalEvent(event) {
+    var payload = JSON.parse(event.data);
+    if (payload.type === 'pending') {
+      var box = el('approvals');
+      var ask = payload.ask;
+      var card = document.createElement('div');
+      card.className = 'row';
+      card.dataset.ask = ask.id;
+      card.innerHTML = '<b>需要批准：' + (ask.toolName || '工具') + '</b>' + (ask.reason ? '<small>' + ask.reason + '</small>' : '');
+      var allow = document.createElement('button');
+      allow.className = 'primary';
+      allow.textContent = '允许一次';
+      allow.onclick = function () { answer(ask.id, true); };
+      var deny = document.createElement('button');
+      deny.textContent = '拒绝';
+      deny.style.marginLeft = '8px';
+      deny.onclick = function () { answer(ask.id, false); };
+      var actions = document.createElement('div');
+      actions.style.marginTop = '8px';
+      actions.appendChild(allow); actions.appendChild(deny);
+      card.appendChild(actions);
+      box.appendChild(card);
+      show('approvals', true);
+      return;
+    }
+    if (payload.type === 'settled') {
+      var settled = el('approvals').querySelector('[data-ask="' + payload.id + '"]');
+      if (settled) settled.remove();
+      if (el('approvals').children.length === 0) show('approvals', false);
+    }
+  }
+
+  function openSession(sessionId, title) {
+    state.sessionId = sessionId;
+    state.view = 'thread';
+    state.lastSeq = 0;
+    show('list', false); show('thread', true); show('composer', true); show('back', true);
+    setTitle(title || '对话');
+    el('thread').innerHTML = '';
+    api('/sessions/' + encodeURIComponent(sessionId) + '/messages?limit=60').then(function (r) {
+      if (!r.json.ok) { setTitle('加载失败'); return; }
+      var thread = el('thread');
+      thread.innerHTML = '';
+      r.json.value.messages.forEach(function (m) { thread.appendChild(bubble(m)); state.lastSeq = Math.max(state.lastSeq, m.seq || 0); });
+      if (r.json.value.title) setTitle(r.json.value.title);
+      window.scrollTo(0, document.body.scrollHeight);
+    });
+    if (state.source) state.source.close();
+    var source = new EventSource('/sessions/' + encodeURIComponent(sessionId) + '/events');
+    source.addEventListener('approval', onApprovalEvent);
+    source.addEventListener('frame', function (event) {
+      var frame = JSON.parse(event.data);
+      if (frame.type === 'assistant-stream' && frame.frame && frame.frame.kind === 'delta' && typeof frame.frame.text === 'string') {
+        var thread = el('thread');
+        var last = thread.lastElementChild;
+        if (last && last.classList.contains('assistant') && last.dataset.streaming === '1') last.textContent += frame.frame.text;
+        else { var node = bubble({ role: 'assistant', text: frame.frame.text }); node.dataset.streaming = '1'; thread.appendChild(node); }
+        window.scrollTo(0, document.body.scrollHeight);
+      }
+    });
+    state.source = source;
+  }
+
+  function renderRoots() {
+    state.view = 'roots'; state.sessionId = null;
+    show('thread', false); show('composer', false); show('back', false); show('list', true);
+    setTitle('工作区与对话');
+    var list = el('list');
+    api('/workspaces').then(function (w) {
+      if (w.status === 401) { requireRepair(); return; }
+      api('/sessions').then(function (s) {
+        if (s.status === 401) { requireRepair(); return; }
+        var sessions = (s.json.ok && s.json.value.sessions) || [];
+        var workspaces = (w.json.ok && w.json.value.workspaces) || [];
+        var html = '';
+        html += '<div class="row"><b>新建工作区</b><div style="margin-top:8px"><input id="ws-path" placeholder="D:\projects" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)"></div><div style="margin-top:8px"><button class="primary" id="ws-go">创建</button></div><small id="ws-error"></small></div>';
+        html += '<div class="row"><b>新建对话</b><div style="margin-top:8px"><select id="sess-ws" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)">';
+        html += '<option value="">（新建工作区 / 默认）</option>';
+        workspaces.forEach(function (ws) { html += '<option value="' + ws.workspaceId + '">' + (ws.title || ws.path || ws.workspaceId) + '</option>'; });
+        html += '</select></div><div style="margin-top:8px"><button class="primary" id="sess-go">创建</button></div><small id="sess-error"></small></div>';
+        workspaces.forEach(function (ws) {
+          html += '<div class="row"><b>' + (ws.title || ws.path || ws.workspaceId) + '</b><small>' + (ws.path || '') + '</small></div>';
+        });
+        sessions.forEach(function (s) {
+          html += '<div class="row" data-session="' + s.sessionId + '" data-title="' + (s.title || '') + '"><b>' + (s.title || s.sessionId.slice(0, 8)) + '</b><small>' + (s.running ? '运行中' : '空闲') + ' · ' + s.sessionId + '</small></div>';
+        });
+        list.innerHTML = html;
+        Array.prototype.forEach.call(list.querySelectorAll('[data-session]'), function (row) {
+          row.onclick = function () { openSession(row.dataset.session, row.dataset.title); };
+        });
+        el('ws-go').onclick = function () {
+          api('/workspaces', { method: 'POST', body: { path: el('ws-path').value } }).then(function (r) {
+            if (!r.json.ok) { el('ws-error').textContent = r.json.error.code; return; }
+            renderRoots();
+          });
+        };
+        el('sess-go').onclick = function () {
+          var workspaceId = el('sess-ws').value;
+          api('/sessions', { method: 'POST', body: workspaceId ? { workspaceId: workspaceId } : {} }).then(function (r) {
+            if (!r.json.ok) { el('sess-error').textContent = r.json.error.code; return; }
+            openSession(r.json.value.sessionId, '新对话');
+          });
+        };
+      });
+    });
+  }
+
+  function pairable() {
+    var hash = location.hash.replace(/^#p=/, '');
+    if (!hash || hash === location.hash) return false;
+    var parts = hash.split('.');
+    if (parts.length !== 2) return false;
+    el('pair-code').value = parts[0];
+    el('pair-secret').value = parts[1];
+    return true;
+  }
+
+  function pair() {
+    api('/pair', { method: 'POST', body: { code: el('pair-code').value, secret: el('pair-secret').value, deviceName: navigator.userAgent.slice(0, 40) } }).then(function (r) {
+      if (!r.json.ok) { el('pair-error').textContent = r.json.error.code; return; }
+      state.token = r.json.value.token;
+      localStorage.setItem(TOKEN_KEY, state.token);
+      location.hash = '';
+      /* The official Web UI is the intended surface; prove the token, get a cookie, land there. */
+      location.replace('/ui/login?token=' + encodeURIComponent(state.token));
+    });
+  }
+
+  function requireRepair() {
+    el('pair-error').textContent = '凭据已失效（可能被撤销），请重新配对';
+    state.token = '';
+    localStorage.removeItem(TOKEN_KEY);
+    show('pairing', true);
+    show('list', false);
+    show('thread', false);
+    show('composer', false);
+  }
+
+  function boot() {
+    if (!state.token) { show('pairing', true); show('list', false); show('thread', false); show('composer', false); return; }
+    show('pairing', false);
+    api('/hello').then(function (r) {
+      if (r.status === 401) { requireRepair(); return; }
+      renderRoots();
+      loadApprovals();
+      if (state.desk) state.desk.close();
+      var desk = new EventSource('/events');
+      desk.addEventListener('approval', onApprovalEvent);
+      state.desk = desk;
+    });
+  }
+
+  el('pair-go').onclick = pair;
+  el('refresh').onclick = function () { state.view === 'thread' && state.sessionId ? openSession(state.sessionId, el('title').textContent) : renderRoots(); };
+  el('back').onclick = renderRoots;
+  el('send').onclick = function () {
+    var text = el('text').value.trim();
+    if (!text || !state.sessionId) return;
+    api('/sessions/' + encodeURIComponent(state.sessionId) + '/prompt', { method: 'POST', body: { text: text } }).then(function (r) {
+      if (r.json.ok) { el('text').value = ''; el('thread').appendChild(bubble({ role: 'user', text: text })); window.scrollTo(0, document.body.scrollHeight); }
+    });
+  };
+  el('cancel').onclick = function () {
+    if (state.sessionId) api('/sessions/' + encodeURIComponent(state.sessionId) + '/cancel', { method: 'POST', body: {} });
+  };
+
+  if (pairable()) { show('pairing', true); pair(); } else { boot(); }
+})();
+</script>
+</body>
+</html>

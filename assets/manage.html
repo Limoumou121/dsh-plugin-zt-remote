@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DSH 远程管理</title>
+<style>
+  :root { color-scheme: light dark; --fg:#111; --bg:#fafafa; --muted:#6b7280; --line:#e5e7eb; --accent:#0b5cff; --card:#fff; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#f3f4f6; --bg:#17181a; --muted:#9ca3af; --line:#2c2e33; --accent:#6ea8fe; --card:#1f2124; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; color:var(--fg); background:var(--bg); }
+  header { display:flex; gap:8px; align-items:center; padding:10px 12px; background:var(--card); border-bottom:1px solid var(--line); }
+  header h1 { font-size:16px; margin:0; flex:1; }
+  a.home { color:var(--accent); text-decoration:none; }
+  main { padding:12px; }
+  .row { padding:12px; margin-bottom:10px; background:var(--card); border:1px solid var(--line); border-radius:10px; }
+  .row h2 { font-size:15px; margin:0 0 6px; }
+  .row small { color:var(--muted); display:block; margin-top:4px; word-break:break-all; }
+  input { width:100%; font:inherit; padding:10px; margin-top:8px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); }
+  button { font:inherit; padding:8px 14px; margin-top:8px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .ok { color:#15803d; } .bad { color:#b91c1c; }
+  ul { margin:6px 0 0; padding-left:20px; } li { margin:2px 0; word-break:break-all; }
+</style>
+</head>
+<body>
+<header>
+  <h1>DSH 远程管理</h1>
+  <a class="home" href="/ui/">返回界面</a>
+</header>
+<main>
+  <div class="row">
+    <h2>按路径添加工作区</h2>
+    <small>远程无法使用系统目录选择器（它会在运行 dsh 的电脑上弹窗）。请直接输入或粘贴该电脑上的绝对路径。</small>
+    <input id="path" placeholder="D:\projects 或 C:\Users\me\work">
+    <button class="primary" id="add">添加</button>
+    <small id="result"></small>
+  </div>
+  <div class="row">
+    <h2>已登记的工作区</h2>
+    <ul id="workspaces"><li>加载中…</li></ul>
+  </div>
+  <div class="row">
+    <h2>接入的设备</h2>
+    <small>需要操作者密钥：在运行 dsh 的电脑上查看 <code>~/.dsh/plugin-data/dsh-plugin-zt-remote/pairing.txt</code> 第二行。</small>
+    <input id="key" placeholder="operator key">
+    <button id="load">查看设备</button>
+    <button id="revokeAll">全部撤销</button>
+    <ul id="devices"><li>—</li></ul>
+  </div>
+</main>
+<script>
+(function () {
+  var el = function (id) { return document.getElementById(id); };
+
+  function api(path, options) {
+    options = options || {};
+    var headers = { 'content-type': 'application/json' };
+    if (options.key) headers['x-zt-operator-key'] = options.key;
+    return fetch(path, { method: options.method || 'GET', headers: headers, body: options.body ? JSON.stringify(options.body) : undefined })
+      .then(function (res) { return res.json().then(function (json) { return { status: res.status, json: json }; }); });
+  }
+
+  function renderWorkspaces(list) {
+    var box = el('workspaces');
+    if (!list.length) { box.innerHTML = '<li>（空）</li>'; return; }
+    box.innerHTML = '';
+    list.forEach(function (w) {
+      var li = document.createElement('li');
+      li.textContent = (w.title || w.path || w.workspaceId) + '  —  ' + (w.path || '') + (w.sessionCount ? '  (' + w.sessionCount + ' 个会话)' : '');
+      box.appendChild(li);
+    });
+  }
+
+  function loadWorkspaces() {
+    api('/workspaces').then(function (r) {
+      if (r.status === 401) { el('workspaces').innerHTML = '<li class="bad">需要先配对</li>'; return; }
+      renderWorkspaces(r.json.value ? r.json.value.workspaces || [] : []);
+    });
+  }
+
+  el('add').onclick = function () {
+    var path = el('path').value.trim();
+    if (!path) { el('result').textContent = '请先填写路径'; return; }
+    el('result').textContent = '处理中…';
+    api('/workspaces', { method: 'POST', body: { path: path } }).then(function (r) {
+      if (r.json.ok) {
+        el('result').className = 'ok';
+        el('result').textContent = r.json.value.created ? '已添加：' + (r.json.value.workspace.path || path) : '该目录已登记：' + (r.json.value.workspace.path || path);
+        el('path').value = '';
+        loadWorkspaces();
+        return;
+      }
+      el('result').className = 'bad';
+      el('result').textContent = '失败：' + (r.json.error.code || '') + ' ' + (r.json.error.message || '');
+    });
+  };
+
+  function loadDevices() {
+    var key = el('key').value.trim();
+    if (!key) { el('devices').innerHTML = '<li class="bad">请先填写 operator key</li>'; return; }
+    api('/operator/devices', { key: key }).then(function (r) {
+      if (!r.json.ok) { el('devices').innerHTML = '<li class="bad">' + (r.json.error.code || '失败') + '</li>'; return; }
+      var box = el('devices');
+      box.innerHTML = '';
+      var list = r.json.value.devices || [];
+      if (!list.length) { box.innerHTML = '<li>（无）</li>'; return; }
+      list.forEach(function (d) {
+        var li = document.createElement('li');
+        li.textContent = d.name + '  ·  ' + (d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString() : '未使用');
+        var del = document.createElement('button');
+        del.textContent = '撤销';
+        del.style.marginLeft = '8px';
+        del.onclick = function () {
+          api('/operator/revoke', { method: 'POST', key: key, body: { deviceId: d.id } }).then(loadDevices);
+        };
+        li.appendChild(del);
+        box.appendChild(li);
+      });
+    });
+  }
+
+  el('load').onclick = loadDevices;
+  el('revokeAll').onclick = function () {
+    var key = el('key').value.trim();
+    if (!key) { el('devices').innerHTML = '<li class="bad">请先填写 operator key</li>'; return; }
+    api('/operator/revoke', { method: 'POST', key: key, body: {} }).then(loadDevices);
+  };
+
+  loadWorkspaces();
+})();
+</script>
+</body>
+</html>

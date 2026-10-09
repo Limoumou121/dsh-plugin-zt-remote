@@ -1,0 +1,20 @@
+# Dependencies and build residue
+node_modules/
+pnpm-lock.yaml
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
+
+# Plugin state: paired devices, the pairing URL, and the operator key live here when
+# a deployment points its stateDir at the package. Never commit them.
+pairing.txt
+devices.json
+upgrades.log
+plugin-data/
+
+# Verification output
+*.tmp
