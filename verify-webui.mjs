@@ -6,7 +6,7 @@ const check = (label, ok, detail) => {
 }
 
 const hello = await (await fetch(`${origin}/hello`)).json()
-check('build generation', hello.value?.build === 'r27-sidebar-panel', hello.value?.build ?? '(none)')
+check('build generation', hello.value?.build === 'r30-operator-peer', hello.value?.build ?? '(none)')
 
 /* The shell's plugin-bundle URL is a `?` query, so the proxy must forward it verbatim.
    Dropping that query was what produced "Failed to load plugins". */

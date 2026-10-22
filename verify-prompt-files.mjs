@@ -1,8 +1,12 @@
 /**
  * Acceptance for the two things the phone interface must do: carry prompts and
  * carry files. Both go over the routes the official Web UI itself uses.
+ *
+ * Usage: node verify-prompt-files.mjs [origin] [workspace-path]
+ * The workspace defaults to the current directory, which the Host always accepts.
  */
 const origin = process.argv[2] ?? 'http://192.0.2.10:8790'
+const workspace = process.argv[3] ?? process.cwd()
 let failures = 0
 const check = (label, ok, detail) => {
   console.log(`${ok ? 'PASS' : 'FAIL'} ${label}${detail === undefined ? '' : ` -- ${detail}`}`)
@@ -26,7 +30,7 @@ const call = async (endpoint, args) => {
 const sessions = await call('session/list', { _request: {} })
 check('the session roster is readable', sessions.text.includes('"ok":true'), `${[...sessions.text.matchAll(/"sessionId"/g)].length} sessions`)
 
-const created = await call('session/create', { request: { cwd: '<dsh-install>无工作区任务' } })
+const created = await call('session/create', { request: { cwd: workspace } })
 const sessionId = created.text.match(/"sessionId":"([^"]+)"/)?.[1]
 check('a conversation can be created', sessionId !== undefined, sessionId ?? created.text.slice(0, 120))
 
