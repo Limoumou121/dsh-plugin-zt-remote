@@ -91,6 +91,9 @@ Everything is configurable from the profile's `cordis.patch.yml`:
 | `bodyLimitBytes` | `1048576` | Maximum request body. |
 | `historyPageLimit` | `60` | Messages per history page. |
 | `stateDir` | `''` | Paired-device directory; empty uses `$DSH_HOME/plugin-data/dsh-plugin-zt-remote`. |
+| `hostBase` | `''` | Loopback origin of the Host Web UI. Empty detects it from the live `webServer` service; set it only to pin a specific origin. |
+
+The desktop Host chooses its port per launch, so `hostBase` defaults to detection. A fixed value goes stale on the next start: the proxy then reaches a closed port and the Web UI answers `webui/host-session-unavailable`. `/hello` reports the resolved origin under `value.hostBase`, which distinguishes a stale configuration from a genuine Host failure.
 
 Auto-detection refuses to start when no interface matches, or when several do:
 a surface that can execute shell commands must never widen to every interface
