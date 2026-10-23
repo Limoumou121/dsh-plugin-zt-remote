@@ -12,13 +12,17 @@
 **配置平面是刻意不提供的**：没有设置页、没有凭据路由、没有模型 Provider 路由、没有目录选择器。
 插件只够得着上面这些动作所需的 Remote 方法，所以已配对的设备能驱动任务，却无法重配 Harness。
 
-## 为什么接口是窄的
+## Why the interface is narrow
 
 Harness Host 自己的 `/api` 路由本来就只信任回环来源，并要求启动 token 或签名会话 cookie。
 本插件不碰那条路由、不改 webserver 绑定、也不读 Harness 的会话 cookie：它自己开监听、
 用自己的设备令牌鉴权，并以 operator 身份在进程内调用 Remote 方法。
 
-## 配置
+## Sidebar panel
+
+侧栏入口与面板。DSH 在启动时按 `dsh.client` 组装浏览器 bundle，所以客户端改动需要**冷启动**才会发布；面板提供工作区列表、按路径新建工作区，以及设备名册与撤销。手机从本插件的监听器加载面板，因此那些请求是真正的同源路由；桌面页面由 Host 源提供，那里没有这些路由，面板会用行内文字说明。
+
+## Configuration
 
 所有可调项都在 profile 的 `cordis.patch.yml` 里：
 
@@ -46,14 +50,18 @@ Harness Host 自己的 `/api` 路由本来就只信任回环来源，并要求�
 自动识别在「没有接口匹配」或「多个接口匹配」时会**拒绝启动**：
 一个能执行 shell 的接口，绝不能因为识别失败而放宽到所有网卡。
 
-## 配对
+## Access
+
+默认开启 `autoAccess`：手机直接打开固定地址 `http://<ZeroTier 地址>:8790/` 即进入官方 UI，不需要配对码，也不需要 URL 里的 token。任何能到达该端口的设备都会被登记为操作者，所以 **ZeroTier 网络成员资格就是唯一边界**；设为 `autoAccess: false` 可恢复配对门禁。
+
+## Pairing (with `autoAccess: false`)
 
 启动后插件会打印配对 URL，并写入 `<stateDir>/pairing.txt`。在手机上打开一次，
 页面会把配对码与密钥 POST 到 `/pair`，把返回的令牌存进 `localStorage`。
 每个配对码一次性使用且会过期。设备令牌只存 SHA-256 摘要；
-`/operator/revoke`（仅限回环调用方）可撤销单台或全部设备。
+`/operator/revoke`（需要操作者密钥；回环调用方免密钥）可撤销单台或全部设备。
 
-## HTTP 接口
+## HTTP surface
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -68,16 +76,24 @@ Harness Host 自己的 `/api` 路由本来就只信任回环来源，并要求�
 | POST | `/sessions/:id/prompt` | 用 `{ text, mode? }` 继续对话。 |
 | POST | `/sessions/:id/cancel` | 取消正在跑的回合。 |
 | GET | `/sessions/:id/events` | SSE：历史快照与后续帧。 |
-| GET | `/operator/code`、`/operator/devices` | 仅回环：配对码与设备名册。 |
-| POST | `/operator/revoke` | 仅回环：撤销设备。 |
+| GET | `/operator/code`、`/operator/devices` | 需要操作者密钥（回环免密钥）：配对码与设备名册。 |
+| POST | `/operator/revoke` | 需要操作者密钥（回环免密钥）：撤销设备。 |
 
-## 安全说明
+## Approvals
+
+Host 通过 waterfall 派发 `approval/request`，插件注册一个监听器，在手机作答前最多保持 60 秒。`POST /answers` 的 `allow: true` 返回 `allowed-once`，`false` 返回 `rejected`；超时、设备被撤销或插件卸载都会把决定交回桌面应答者，桌面行为不变。
+
+## Security notes
 
 绑到 ZeroTier 接口意味着该虚拟网络上的每台设备都能连这个端口，
 而设备令牌是挡在一个能执行 shell、能改文件的 agent 前面的唯一一道闸。
 请把 ZeroTier 网络成员收紧，用撤销＋重新配对来轮换令牌，并把
 `pairing.txt` 当成凭据对待。
 
-## 许可
+## Verification status
+
+`lib/tests/all.test.js` 覆盖 78 项单元测试；四个验收脚本针对运行中的 Host 执行（例如 `node verify-webui.mjs <origin>`）。`/hello` 回报 `build` 与 `hostBase`，用于区分陈旧版本与错误端口；客户端改动需要冷启动才能载入。
+
+## License
 
 MIT

@@ -1,9 +1,10 @@
 {
   "name": "dsh-plugin-zt-remote",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Reach the DeepSeek Harness Web UI over a ZeroTier address: the official UI, plus the phone's own prompt, file, and device routes.",
   "type": "module",
+  "packageManager": "pnpm@11.7.0",
   "main": "lib/index.js",
   "exports": {
     ".": {
@@ -12,11 +13,16 @@
     "./client": {
       "default": "./lib/client.js"
     },
+    "./icon": {
+      "default": "./icon.svg"
+    },
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
     "assets",
+    "locale",
     "cordis.patch.yml",
     "icon.svg",
     "README.md"

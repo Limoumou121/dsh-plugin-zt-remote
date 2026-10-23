@@ -52,15 +52,8 @@ Both halves reach the same routes `lib/server.js` already served:
 A phone loads the panel from this plugin's own listener, so those are the literal
 same-origin routes and the device cookie rides along, exactly as the standalone page
 at `/ui/manage` already worked. A desktop page is served by the Host origin, where
-nothing answers `/workspaces`; `lib/web-bridge.js` therefore registers one
-`ctx.webServer` prefix route (`/zt-remote`) that answers the same four paths by
-calling the plugin's own services in-process. That bridge is loopback-only, mounts
-nothing else — no session, prompt, event, or approval route — and never hands the
-operator key to the browser. In a composition without a Web server (a headless
-profile) it is skipped and the panel reports the failure inline.
-
-`/ui/manage` remains a valid standalone page; the plugin no longer injects a link to
-it into the proxied shell.
+nothing answers those paths; the panel reports that as inline text and keeps working
+on the phone. `/ui/manage` remains a valid standalone page.
 
 **Client-plugin changes need a cold restart of DSH.** The browser bundle is read when
 the page composes its entry graph, so a restart of the Host is what publishes a changed
@@ -171,9 +164,9 @@ digests, and the operator key lives only in that 0600 file and the Host log.
 | GET | `/operator/code`, `/operator/devices` | Operator-key pairing material and roster. |
 | POST | `/operator/revoke` | Operator-key device revocation. |
 
-On the Host origin the same four workspace and device paths are also reachable under
-the bridge prefix (`/zt-remote/workspaces`, `/zt-remote/operator/devices`,
-`/zt-remote/operator/revoke`) for a loopback page; see [Sidebar panel](#sidebar-panel).
+On the Host origin the same four workspace and device paths are not reachable from a
+page; the sidebar panel reports that inline and keeps working against the plugin's own
+listener, which is what serves a phone. See [Sidebar panel](#sidebar-panel).
 
 ## Approvals
 
